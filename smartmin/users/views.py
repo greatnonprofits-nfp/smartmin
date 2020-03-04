@@ -2,6 +2,9 @@ from __future__ import unicode_literals
 
 import random
 import string
+import requests
+
+import phonenumbers
 
 from datetime import timedelta
 from django import forms
@@ -21,6 +24,22 @@ from django.views.generic import TemplateView
 from smartmin.email import build_email_context
 from smartmin.views import SmartCRUDL, SmartView, SmartFormView, SmartListView, SmartCreateView, SmartUpdateView
 from .models import RecoveryToken, PasswordHistory, FailedLogin, is_password_complex
+
+
+class UserLoginCellPhoneForm(AuthenticationForm):
+    tel = forms.CharField(label=_("Your Phone Number"),
+                          help_text=_("Your phone number with country code, ex: +250788123123"))
+
+    def clean_tel(self):
+        tel = self.cleaned_data['tel'].strip()
+        if not tel.startswith('+'):
+            tel = '+%s' % tel
+        return tel
+
+
+class UserAuthyForm(AuthenticationForm):
+    authy_code = forms.CharField(label=_("Authy Code"),
+                                 help_text=_("Use the Authy code generated on the App or SMS"))
 
 
 class UserForm(forms.ModelForm):
@@ -435,6 +454,10 @@ def login(request, template_name='smartmin/users/login.html',
     failed_login_limit = getattr(settings, 'USER_FAILED_LOGIN_LIMIT', 5)
     allow_email_recovery = getattr(settings, 'USER_ALLOW_EMAIL_RECOVERY', True)
 
+    authy_headers = {
+        'x-authy-api-key': getattr(settings, 'AUTHY_API_KEY', True)
+    }
+
     if request.method == "POST":
         if 'username' in request.POST and 'password' in request.POST:
             # we are using AuthenticationForm in which username is CharField with strip=True that automatically strips
@@ -465,6 +488,58 @@ def login(request, template_name='smartmin/users/login.html',
                 # delete failed logins if the password is valid
                 elif valid_password:
                     FailedLogin.objects.filter(user=user).delete()
+
+                user_settings = get_user_model().get_settings(user)
+
+                cellphone = request.POST.get('tel', None)
+                authy_code = request.POST.get('authy_code', None)
+
+                if cellphone:
+                    if not cellphone.startswith('+'):
+                        cellphone = '+%s' % cellphone
+                    phone = phonenumbers.parse(cellphone)
+                    country_code = phone.country_code
+                    phone_without_cc = cellphone.replace('+%s' % country_code, '')
+
+                    # Generating Authy user
+                    payload = "user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}".format(username, phone_without_cc, country_code)
+                    create_user_header = authy_headers
+                    create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
+                    authy_url_api = 'https://api.authy.com/protected/json/users/new'
+                    response = requests.request("POST", authy_url_api, data=payload, headers=create_user_header)
+                    response_json = response.json()
+                    if response_json.get('success', False):
+                        authy_id = response_json['user']['id']
+                        user_settings.tel = phonenumbers.format_number(phone, phonenumbers.PhoneNumberFormat.E164)
+                        user_settings.authy_id = authy_id
+                        user_settings.save(update_fields=['tel', 'authy_id'])
+
+                # Redirecting user to add cell phone or asking the Authy code
+                if not user_settings.tel:
+                    messages.error(request, _('Inform your cell phone to make sure that you are making safe login'))
+                    return django_login(request, template_name='smartmin/users/login.html',
+                                        redirect_field_name=REDIRECT_FIELD_NAME,
+                                        authentication_form=UserLoginCellPhoneForm,
+                                        current_app=None, extra_context=dict(allow_email_recovery=allow_email_recovery,
+                                                                             no_cellphone=True,
+                                                                             no_recaptcha=True))
+                elif not authy_code:
+                    authy_url_api = 'https://api.authy.com/protected/json/sms/%s' % user_settings.authy_id
+                    requests.request("GET", authy_url_api, headers=authy_headers)
+                    return django_login(request, template_name='smartmin/users/login.html',
+                                        redirect_field_name=REDIRECT_FIELD_NAME,
+                                        authentication_form=UserAuthyForm,
+                                        current_app=None, extra_context=dict(allow_email_recovery=allow_email_recovery,
+                                                                             no_authy_code=True,
+                                                                             no_recaptcha=True))
+                elif authy_code:
+                    authy_url_api = 'https://api.authy.com/protected/json/verify/%s/%s' % (authy_code, user_settings.authy_id)
+                    response = requests.request("GET", authy_url_api, headers=authy_headers)
+                    response_json = response.json()
+                    if not response_json.get('success'):
+                        FailedLogin.objects.create(user=user)
+                        messages.error(request, _('Login failed: Incorrect Authy code'), extra_tags='danger')
+                        return HttpResponseRedirect(reverse('users.user_login'))
 
     return django_login(request, template_name='smartmin/users/login.html',
                         redirect_field_name=REDIRECT_FIELD_NAME,
