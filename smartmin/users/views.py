@@ -502,6 +502,11 @@ def login(request, template_name='smartmin/users/login.html',
                     phone_without_cc = cellphone.replace('+%s' % country_code, '')
 
                     # Generating Authy user
+
+                    # Making sure that username (email) does not have + because Twilio considers as invalid email
+                    if '+' in username:
+                        username = username.replace('+', '_')
+
                     payload = "user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}".format(username, phone_without_cc, country_code)
                     create_user_header = authy_headers
                     create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
@@ -513,10 +518,13 @@ def login(request, template_name='smartmin/users/login.html',
                         user_settings.tel = phonenumbers.format_number(phone, phonenumbers.PhoneNumberFormat.E164)
                         user_settings.authy_id = authy_id
                         user_settings.save(update_fields=['tel', 'authy_id'])
+                    else:
+                        messages.error(request, 'Authy message: %s' % response_json.get('message'))
+                        return HttpResponseRedirect(reverse('users.user_login'))
 
                 # Redirecting user to add cell phone or asking the Authy code
                 if not user_settings.tel:
-                    messages.error(request, _('Inform your cell phone to make sure that you are making safe login'))
+                    messages.error(request, _('Inform your phone number to make sure that you are making safe login'))
                     return django_login(request, template_name='smartmin/users/login.html',
                                         redirect_field_name=REDIRECT_FIELD_NAME,
                                         authentication_form=UserLoginCellPhoneForm,
@@ -538,7 +546,7 @@ def login(request, template_name='smartmin/users/login.html',
                     response_json = response.json()
                     if not response_json.get('success'):
                         FailedLogin.objects.create(user=user)
-                        messages.error(request, _('Login failed: Incorrect Authy code'), extra_tags='danger')
+                        messages.error(request, _('Login failed: incorrect Authy code'))
                         return HttpResponseRedirect(reverse('users.user_login'))
 
     return django_login(request, template_name='smartmin/users/login.html',
