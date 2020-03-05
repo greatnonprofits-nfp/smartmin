@@ -503,6 +503,8 @@ def login(request, template_name='smartmin/users/login.html',
                 cellphone = request.POST.get('tel', None)
                 authy_code = request.POST.get('authy_code', None)
 
+                authy_base_url = 'https://api.authy.com/protected/json/%s'
+
                 if cellphone:
                     if not cellphone.startswith('+'):
                         cellphone = '+%s' % cellphone
@@ -519,7 +521,7 @@ def login(request, template_name='smartmin/users/login.html',
                     payload = "user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}".format(username, phone_without_cc, country_code)
                     create_user_header = authy_headers
                     create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
-                    authy_url_api = 'https://api.authy.com/protected/json/users/new'
+                    authy_url_api = authy_base_url % 'users/new'
                     response = requests.request("POST", authy_url_api, data=payload, headers=create_user_header)
                     response_json = response.json()
                     if response_json.get('success', False):
@@ -543,7 +545,7 @@ def login(request, template_name='smartmin/users/login.html',
                         )
                     ))
                 elif not authy_code:
-                    authy_url_api = 'https://api.authy.com/protected/json/sms/%s' % user_settings.authy_id
+                    authy_url_api = authy_base_url % 'sms/%s' % user_settings.authy_id
                     requests.request("GET", authy_url_api, headers=authy_headers)
                     django_login_args.update(dict(
                         authentication_form=UserAuthyForm,
@@ -554,7 +556,7 @@ def login(request, template_name='smartmin/users/login.html',
                         )
                     ))
                 elif authy_code:
-                    authy_url_api = 'https://api.authy.com/protected/json/verify/%s/%s' % (authy_code, user_settings.authy_id)
+                    authy_url_api = authy_base_url % 'verify/%s/%s' % (authy_code, user_settings.authy_id)
                     response = requests.request("GET", authy_url_api, headers=authy_headers)
                     response_json = response.json()
                     if not response_json.get('success'):
