@@ -479,7 +479,7 @@ def login(request, template_name='smartmin/users/login.html',
             if user:
 
                 # incorrect password?  create a failed login token
-                valid_password = user.check_password(request.POST['password'])
+                valid_password = is_login_allowed = user.check_password(request.POST['password'])
                 if not valid_password:
                     FailedLogin.objects.create(user=user)
 
@@ -497,6 +497,9 @@ def login(request, template_name='smartmin/users/login.html',
                 # delete failed logins if the password is valid
                 elif valid_password:
                     FailedLogin.objects.filter(user=user).delete()
+
+                if not is_login_allowed:
+                    return django_login(**django_login_args)
 
                 user_settings = get_user_model().get_settings(user)
 
