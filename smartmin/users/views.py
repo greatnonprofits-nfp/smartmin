@@ -86,6 +86,10 @@ class UserForm(forms.ModelForm):
 class UserUpdateForm(UserForm):
     new_password = forms.CharField(label=_("New Password"), widget=forms.PasswordInput, required=False, strip=False)
 
+    tel = forms.CharField(label=_("Phone Number"), max_length=16, required=False)
+
+    authy_id = forms.CharField(label=_("Authy ID"), max_length=100, required=False)
+
     def clean_new_password(self):
         password = self.cleaned_data['new_password']
 
@@ -248,18 +252,26 @@ class UserCRUDL(SmartCRUDL):
             return obj
 
     class Update(SmartUpdateView):
-        form_class = UserUpdateForm
         template_name = "smartmin/users/user_update.html"
         success_message = "User saved successfully."
-        fields = ('username', 'new_password', 'first_name', 'last_name', 'email', 'groups', 'is_active', 'last_login')
+        fields = ('username', 'new_password', 'first_name', 'last_name', 'email', 'tel', 'authy_id', 'groups',
+                  'is_active', 'last_login')
         field_config = {
             'last_login': dict(readonly=True, label=_("Last Login")),
             'is_active': dict(label=_("Is Active"), help=_("Whether this user is allowed to log into the site")),
             'groups': dict(label=_("Groups"),
                            help=_("Users will only get those permissions that are allowed for their group")),
             'new_password': dict(label=_("New Password"),
-                                 help=_("You can reset the user's password by entering a new password here")),
+                                 help=_("You can reset the user's password by entering a new password here"))
         }
+
+        def get_form_class(self):
+            form = UserUpdateForm
+            user = self.object
+            user_settings = get_user_model().get_settings(user)
+            form.base_fields['tel'].initial = user_settings.tel
+            form.base_fields['authy_id'].initial = user_settings.authy_id
+            return form
 
         def post_save(self, obj):
             """
@@ -274,6 +286,12 @@ class UserCRUDL(SmartCRUDL):
             if 'new_password' in self.form.cleaned_data and self.form.cleaned_data['new_password']:
                 FailedLogin.objects.filter(user=self.object).delete()
                 PasswordHistory.objects.create(user=obj, password=obj.password)
+
+            if 'tel' in self.form.cleaned_data or 'authy_id' in self.form.cleaned_data:
+                user_settings = get_user_model().get_settings(self.object)
+                user_settings.tel = self.form.cleaned_data['tel']
+                user_settings.authy_id = self.form.cleaned_data['authy_id']
+                user_settings.save(update_fields=['tel', 'authy_id'])
 
             return obj
 
