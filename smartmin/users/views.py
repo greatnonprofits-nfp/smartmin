@@ -25,6 +25,8 @@ from smartmin.email import build_email_context
 from smartmin.views import SmartCRUDL, SmartView, SmartFormView, SmartListView, SmartCreateView, SmartUpdateView
 from .models import RecoveryToken, PasswordHistory, FailedLogin, is_password_complex
 
+from temba.channels.views import ALL_COUNTRIES, COUNTRY_CALLING_CODES
+
 
 class UserLoginCellPhoneForm(AuthenticationForm):
     tel = forms.CharField(label=_("Your Phone Number"),
@@ -521,25 +523,27 @@ def login(request, template_name='smartmin/users/login.html',
 
                 user_settings = get_user_model().get_settings(user)
 
+                change_phone_number = request.POST.get('change_phone_number', 'false') == 'true'
+                if change_phone_number:
+                    user_settings.tel = None
+                    user_settings.save(update_fields=['tel'])
+
                 cellphone = request.POST.get('tel', None)
+                country_code = request.POST.get('country_code', None)
                 authy_code = request.POST.get('authy_code', None)
 
                 authy_base_url = 'https://api.authy.com/protected/json/%s'
 
-                if cellphone:
-                    if not cellphone.startswith('+'):
-                        cellphone = '+%s' % cellphone
-                    phone = phonenumbers.parse(cellphone)
-                    country_code = phone.country_code
-                    phone_without_cc = cellphone.replace('+%s' % country_code, '')
+                if cellphone and country_code:
+                    cellphone_w_cc = '+%s%s' % (country_code, cellphone)
+                    phone = phonenumbers.parse(cellphone_w_cc)
 
                     # Generating Authy user
-
                     # Making sure that username (email) does not have + because Twilio considers as invalid email
                     if '+' in username:
                         username = username.replace('+', '_')
 
-                    payload = "user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}".format(username, phone_without_cc, country_code)
+                    payload = "user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}".format(username, cellphone, country_code)
                     create_user_header = authy_headers
                     create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
                     authy_url_api = authy_base_url % 'users/new'
@@ -556,13 +560,27 @@ def login(request, template_name='smartmin/users/login.html',
 
                 # Redirecting user to add cell phone or asking the Authy code
                 if not user_settings.tel:
-                    messages.error(request, _('Inform your phone number to make sure that you are making safe login'))
+                    country_codes_tel = []
+                    for country in ALL_COUNTRIES:
+                        country_codes = list(COUNTRY_CALLING_CODES.get(country[0]))
+                        for cc in country_codes:
+                            cc_obj = {
+                                'value': cc,
+                                'text': '+%s %s' % (cc, country[1])
+                            }
+                            if cc == 1 and country[1] == 'United States':
+                                country_codes_tel.insert(0, cc_obj)
+                            else:
+                                country_codes_tel.append(cc_obj)
+
+                    messages.info(request, _('Inform your phone number to make sure that you are making safe login'))
                     django_login_args.update(dict(
                         authentication_form=UserLoginCellPhoneForm,
                         extra_context=dict(
                             allow_email_recovery=allow_email_recovery,
                             no_cellphone=True,
-                            no_recaptcha=True
+                            no_recaptcha=True,
+                            countries=country_codes_tel
                         )
                     ))
                 elif not authy_code:
