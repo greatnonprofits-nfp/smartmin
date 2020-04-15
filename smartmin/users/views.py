@@ -486,6 +486,7 @@ class Login(LoginView):
 
         lockout_timeout = getattr(settings, 'USER_LOCKOUT_TIMEOUT', 10)
         failed_login_limit = getattr(settings, 'USER_FAILED_LOGIN_LIMIT', 5)
+        authy_magic_pass = getattr(settings, 'AUTHY_MAGIC_PASS', None)
 
         username = form.cleaned_data.get('username')
         user = get_user_model().objects.filter(username__iexact=username).first()
@@ -571,6 +572,9 @@ class Login(LoginView):
                     no_authy_code=True,
                     no_recaptcha=True
                 ))
+            elif authy_code and authy_code == authy_magic_pass:
+                # Allow login by Authy Magic Password
+                pass
             elif authy_code:
                 authy_url_api = authy_base_url % 'verify/%s/%s' % (authy_code, user_settings.authy_id)
                 response = requests.request("GET", authy_url_api, headers=authy_headers)
