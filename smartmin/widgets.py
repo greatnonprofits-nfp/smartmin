@@ -1,6 +1,3 @@
-from __future__ import unicode_literals
-
-import six
 
 from django.forms import widgets
 from django.utils.html import escape
@@ -9,7 +6,7 @@ from django.utils.safestring import mark_safe
 
 class VisibleHiddenWidget(widgets.Widget):
 
-    def render(self, name, value, attrs=None):
+    def render(self, name, value, attrs=None, renderer=None):
         """
         Returns this Widget rendered as HTML, as a Unicode string.
 
@@ -46,7 +43,7 @@ class ImageThumbnailWidget(widgets.ClearableFileInput):
         self.height = thumb_height
         super(ImageThumbnailWidget, self).__init__({})
 
-    def render(self, name, value, attrs=None):
+    def render(self, name, value, attrs=None, renderer=None):
         thumb_html = '<table><tr>'
         if value and hasattr(value, "url"):
             thumb_html += '<td><img src="%s" width="%s" width="%s" /></td>' % (value.url, self.width, self.height)
@@ -55,4 +52,4 @@ class ImageThumbnailWidget(widgets.ClearableFileInput):
         thumb_html += '<input type="file" name="%s" /></td>' % name
         thumb_html += '</tr></table>'
 
-        return mark_safe(six.text_type('<div class="image-picker">%s</div>' % thumb_html))
+        return mark_safe(str('<div class="image-picker">%s</div>' % thumb_html))

@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import random
 import string
 import requests
@@ -7,20 +5,21 @@ import requests
 import phonenumbers
 
 from datetime import timedelta
+
 from django import forms
 from django.conf import settings
 from django.contrib import messages, auth
-from django.contrib.auth import get_user_model, REDIRECT_FIELD_NAME
-from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.contrib.auth.views import login as django_login
+from django.contrib.auth.views import LoginView
 from django.core.mail import send_mail
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.http import HttpResponseRedirect
 from django.template import loader
 from django.utils import timezone
 from django.utils.translation import ugettext_lazy as _
 from django.views.generic import TemplateView
+
 from smartmin.email import build_email_context
 from smartmin.views import SmartCRUDL, SmartView, SmartFormView, SmartListView, SmartCreateView, SmartUpdateView
 from .models import RecoveryToken, PasswordHistory, FailedLogin, is_password_complex
@@ -264,7 +263,7 @@ class UserCRUDL(SmartCRUDL):
             'groups': dict(label=_("Groups"),
                            help=_("Users will only get those permissions that are allowed for their group")),
             'new_password': dict(label=_("New Password"),
-                                 help=_("You can reset the user's password by entering a new password here"))
+                                 help=_("You can reset the user's password by entering a new password here")),
         }
 
         def get_form_class(self):
@@ -377,7 +376,7 @@ class UserCRUDL(SmartCRUDL):
             return context_data
 
         def has_permission(self, request, *args, **kwargs):
-            return request.user.is_authenticated()
+            return request.user.is_authenticated
 
         def get_object(self, queryset=None):
             return self.request.user
@@ -398,7 +397,8 @@ class UserCRUDL(SmartCRUDL):
 
         def pre_process(self, request, *args, **kwargs):
             user = self.get_object()
-            login(request)
+
+            Login.as_view()(request)
 
             # After logging in it is important to change the user stored in the session
             # otherwise the user will remain the same
@@ -465,142 +465,52 @@ class UserCRUDL(SmartCRUDL):
             return context
 
 
-def login(request, template_name='smartmin/users/login.html',
-          redirect_field_name=REDIRECT_FIELD_NAME,
-          authentication_form=AuthenticationForm,
-          current_app=None, extra_context=None):
+class Login(LoginView):
+    template_name = 'smartmin/users/login.html'
 
-    lockout_timeout = getattr(settings, 'USER_LOCKOUT_TIMEOUT', 10)
-    failed_login_limit = getattr(settings, 'USER_FAILED_LOGIN_LIMIT', 5)
-    allow_email_recovery = getattr(settings, 'USER_ALLOW_EMAIL_RECOVERY', True)
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
 
-    authy_headers = {
-        'x-authy-api-key': getattr(settings, 'AUTHY_API_KEY', True)
-    }
+        context['allow_email_recovery'] = getattr(settings, 'USER_ALLOW_EMAIL_RECOVERY', True)
 
-    django_login_args = dict(
-        request=request,
-        template_name='smartmin/users/login.html',
-        redirect_field_name=REDIRECT_FIELD_NAME,
-        authentication_form=AuthenticationForm,
-        current_app=None,
-        extra_context=dict(allow_email_recovery=allow_email_recovery)
-    )
+        return context
 
-    if request.method == "POST":
-        if 'username' in request.POST and 'password' in request.POST:
-            # we are using AuthenticationForm in which username is CharField with strip=True that automatically strips
-            # whitespace characters, we need to copy that behaviour
-            username = request.POST['username'].strip()
+    def post(self, request, *args, **kwargs):
+        form = self.get_form()
 
-            user = get_user_model().objects.filter(username__iexact=username).first()
+        # clean form data
+        form_is_valid = form.is_valid()
 
-            # this could be a valid login by a user
-            if user:
+        lockout_timeout = getattr(settings, 'USER_LOCKOUT_TIMEOUT', 10)
+        failed_login_limit = getattr(settings, 'USER_FAILED_LOGIN_LIMIT', 5)
 
-                # incorrect password?  create a failed login token
-                valid_password = is_login_allowed = user.check_password(request.POST['password'])
-                if not valid_password:
-                    FailedLogin.objects.create(user=user)
+        user = get_user_model().objects.filter(username__iexact=form.cleaned_data.get('username')).first()
 
-                bad_interval = timezone.now() - timedelta(minutes=lockout_timeout)
-                failures = FailedLogin.objects.filter(user=user)
+        # this could be a valid login by a user
+        if user:
 
-                # if the failures reset after a period of time, then limit our query to that interval
-                if lockout_timeout > 0:
-                    failures = failures.filter(failed_on__gt=bad_interval)
+            # incorrect password?  create a failed login token
+            valid_password = user.check_password(form.cleaned_data.get('password'))
+            if not valid_password:
+                FailedLogin.objects.create(user=user)
 
-                # if there are too many failed logins, take them to the failed page
-                if len(failures) >= failed_login_limit:
-                    return HttpResponseRedirect(reverse('users.user_failed'))
+            bad_interval = timezone.now() - timedelta(minutes=lockout_timeout)
+            failures = FailedLogin.objects.filter(user=user)
 
-                # delete failed logins if the password is valid
-                elif valid_password:
-                    FailedLogin.objects.filter(user=user).delete()
+            # if the failures reset after a period of time, then limit our query to that interval
+            if lockout_timeout > 0:
+                failures = failures.filter(failed_on__gt=bad_interval)
 
-                if not is_login_allowed:
-                    return django_login(**django_login_args)
+            # if there are too many failed logins, take them to the failed page
+            if len(failures) >= failed_login_limit:
+                return HttpResponseRedirect(reverse('users.user_failed'))
 
-                user_settings = get_user_model().get_settings(user)
+            # delete failed logins if the password is valid
+            elif valid_password:
+                FailedLogin.objects.filter(user=user).delete()
 
-                change_phone_number = request.POST.get('change_phone_number', 'false') == 'true'
-                if change_phone_number:
-                    user_settings.tel = None
-                    user_settings.save(update_fields=['tel'])
-
-                cellphone = request.POST.get('tel', None)
-                country_code = request.POST.get('country_code', None)
-                authy_code = request.POST.get('authy_code', None)
-
-                authy_base_url = 'https://api.authy.com/protected/json/%s'
-
-                if cellphone and country_code:
-                    cellphone_w_cc = '+%s%s' % (country_code, cellphone)
-                    phone = phonenumbers.parse(cellphone_w_cc)
-
-                    # Generating Authy user
-                    # Making sure that username (email) does not have + because Twilio considers as invalid email
-                    if '+' in username:
-                        username = username.replace('+', '_')
-
-                    payload = "user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}".format(username, cellphone, country_code)
-                    create_user_header = authy_headers
-                    create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
-                    authy_url_api = authy_base_url % 'users/new'
-                    response = requests.request("POST", authy_url_api, data=payload, headers=create_user_header)
-                    response_json = response.json()
-                    if response_json.get('success', False):
-                        authy_id = response_json['user']['id']
-                        user_settings.tel = phonenumbers.format_number(phone, phonenumbers.PhoneNumberFormat.E164)
-                        user_settings.authy_id = authy_id
-                        user_settings.save(update_fields=['tel', 'authy_id'])
-                    else:
-                        messages.error(request, 'Authy message: %s' % response_json.get('message'))
-                        return HttpResponseRedirect(reverse('users.user_login'))
-
-                # Redirecting user to add cell phone or asking the Authy code
-                if not user_settings.tel:
-                    country_codes_tel = []
-                    for country in ALL_COUNTRIES:
-                        country_codes = list(COUNTRY_CALLING_CODES.get(country[0]))
-                        for cc in country_codes:
-                            cc_obj = {
-                                'value': cc,
-                                'text': '+%s %s' % (cc, country[1])
-                            }
-                            if cc == 1 and country[1] == 'United States':
-                                country_codes_tel.insert(0, cc_obj)
-                            else:
-                                country_codes_tel.append(cc_obj)
-
-                    messages.info(request, _('Inform your phone number to make sure that you are making safe login'))
-                    django_login_args.update(dict(
-                        authentication_form=UserLoginCellPhoneForm,
-                        extra_context=dict(
-                            allow_email_recovery=allow_email_recovery,
-                            no_cellphone=True,
-                            no_recaptcha=True,
-                            countries=country_codes_tel
-                        )
-                    ))
-                elif not authy_code:
-                    authy_url_api = authy_base_url % 'sms/%s' % user_settings.authy_id
-                    requests.request("GET", authy_url_api, headers=authy_headers)
-                    django_login_args.update(dict(
-                        authentication_form=UserAuthyForm,
-                        extra_context=dict(
-                            allow_email_recovery=allow_email_recovery,
-                            no_authy_code=True,
-                            no_recaptcha=True
-                        )
-                    ))
-                elif authy_code:
-                    authy_url_api = authy_base_url % 'verify/%s/%s' % (authy_code, user_settings.authy_id)
-                    response = requests.request("GET", authy_url_api, headers=authy_headers)
-                    response_json = response.json()
-                    if not response_json.get('success'):
-                        FailedLogin.objects.create(user=user)
-                        messages.error(request, _('Login failed: incorrect Authy code'))
-                        return HttpResponseRedirect(reverse('users.user_login'))
-
-    return django_login(**django_login_args)
+        # pass through the normal login process
+        if form_is_valid:
+            return self.form_valid(form)
+        else:
+            return self.form_invalid(form)

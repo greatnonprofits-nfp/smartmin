@@ -1,17 +1,15 @@
-from __future__ import unicode_literals
 
-import six
+from urllib.parse import urlparse
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.test.testcases import TestCase
 from django.utils.encoding import force_str
-from six.moves.urllib.parse import urlparse
 
 
-class SmartminTest(TestCase):
+class SmartminTestMixin(object):
 
     def fetch_protected(self, url, user, post_data=None, failOnFormValidation=True):
         """
@@ -72,9 +70,21 @@ class SmartminTest(TestCase):
 
             if not form.is_valid():
                 errors = []
-                for k, v in six.iteritems(form.errors):
+                for k, v in form.errors.items():
                     errors.append("%s=%s" % (k, force_str(v)))
                 self.fail("Create failed with form errors: %s, Posted: %s" % (",".join(errors), post_data))
+
+    def create_anonymous_user(self):
+        User = get_user_model()
+        _anon_exists = User.objects.filter(username=settings.ANONYMOUS_USER_NAME).exists()
+        if not _anon_exists:
+            user = User(username=settings.ANONYMOUS_USER_NAME)
+            user.set_unusable_password()
+            user.save()
+
+
+class SmartminTest(SmartminTestMixin, TestCase):
+    pass
 
 
 class _CRUDLTest(SmartminTest):

@@ -1,17 +1,17 @@
-from __future__ import unicode_literals
 
-import django.forms.models as model_forms
+
 import json
 import operator
-import six
+from functools import reduce
 
+import django.forms.models as model_forms
 from django import forms
 from django.conf import settings
 from django.conf.urls import url
 from django.contrib import messages
 from django.contrib.auth import REDIRECT_FIELD_NAME
 from django.core.exceptions import ImproperlyConfigured
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.db import IntegrityError
 from django.db.models import Q
 from django.http import HttpResponseRedirect, HttpResponse, JsonResponse
@@ -21,9 +21,10 @@ from django.utils.translation import ugettext_lazy as _
 from django.views.generic.edit import ModelFormMixin, UpdateView, CreateView, ProcessFormView, FormView
 from django.views.generic.base import TemplateView
 from django.views.generic import DetailView, ListView
-from functools import reduce
+
 from smartmin.csv_imports.models import ImportTask
 from smartmin.mixins import NonAtomicMixin
+
 from . import widgets
 
 
@@ -477,7 +478,7 @@ class SmartDeleteView(SmartSingleObjectView, DetailView, ProcessFormView):
 
     def pre_delete(self, obj):
         # auto populate modified_by if it is present
-        if hasattr(obj, 'modified_by_id') and self.request.user.id >= 0:
+        if self.request.user.id and self.request.user.id > 0 and hasattr(obj, 'modified_by_id'):
             obj.modified_by = self.request.user
 
     def post(self, request, *args, **kwargs):
@@ -670,7 +671,7 @@ class SmartListView(SmartView, ListView):
 
         if order:
             # if our order is a single string, convert to a simple list
-            if isinstance(order, six.string_types):
+            if isinstance(order, str):
                 order = (order,)
 
             queryset = queryset.order_by(*order)
@@ -721,7 +722,9 @@ class SmartListView(SmartView, ListView):
 
                 results.append(result)
 
-            json_data = dict(results=results, err='nil', more=context['page_obj'].has_next())
+            has_more = context['page_obj'].has_next() if context['page_obj'] else False
+
+            json_data = dict(results=results, err='nil', more=has_more)
             return JsonResponse(json_data)
         # otherwise, return normally
         else:
@@ -750,14 +753,14 @@ class SmartCsvView(SmartListView):
         # build up our header row
         header = []
         for field in fields:
-            header.append(six.text_type(self.lookup_field_label(dict(), field)))
+            header.append(str(self.lookup_field_label(dict(), field)))
         writer.writerow([s.encode("utf-8") for s in header])
 
         # then our actual values
         for obj in self.object_list:
             row = []
             for field in fields:
-                row.append(six.text_type(self.lookup_field_value(dict(), obj, field)))
+                row.append(str(self.lookup_field_value(dict(), obj, field)))
             writer.writerow([s.encode("utf-8") for s in row])
 
         return response
@@ -781,14 +784,14 @@ class SmartXlsView(SmartListView):
         # build up our header row
         for col in range(len(fields)):
             field = fields[col]
-            sheet1.write(0, col, six.text_type(self.lookup_field_label(dict(), field)))
+            sheet1.write(0, col, str(self.lookup_field_label(dict(), field)))
 
         # then our actual values
         for row in range(len(self.object_list)):
             obj = self.object_list[row]
             for col in range(len(fields)):
                 field = fields[col]
-                value = six.text_type(self.lookup_field_value(dict(), obj, field))
+                value = str(self.lookup_field_value(dict(), obj, field))
                 # skip the header
                 sheet1.write(row + 1, col, value)
 
@@ -1146,7 +1149,7 @@ class SmartUpdateView(SmartModelFormView, UpdateView):
 
     def pre_save(self, obj):
         # auto populate modified_by if it is present
-        if hasattr(obj, 'modified_by_id') and self.request.user.id >= 0:
+        if self.request.user.id and self.request.user.id > 0 and hasattr(obj, 'modified_by_id'):
             obj.modified_by = self.request.user
 
         return obj
@@ -1254,13 +1257,14 @@ class SmartCreateView(SmartModelFormView, CreateView):
         return False
 
     def pre_save(self, obj):
-        # auto populate created_by if it is present
-        if hasattr(obj, 'created_by_id') and self.request.user.id >= 0:
-            obj.created_by = self.request.user
+        if self.request.user.id and self.request.user.id > 0:
+            # auto populate created_by if it is present
+            if hasattr(obj, 'created_by_id'):
+                obj.created_by = self.request.user
 
-        # auto populate modified_by if it is present
-        if hasattr(obj, 'modified_by_id') and self.request.user.id >= 0:
-            obj.modified_by = self.request.user
+            # auto populate modified_by if it is present
+            if hasattr(obj, 'modified_by_id'):
+                obj.modified_by = self.request.user
 
         return obj
 

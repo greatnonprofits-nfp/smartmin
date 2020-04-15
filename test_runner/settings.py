@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 import warnings
 
 DEBUG = True
@@ -87,7 +85,7 @@ STATICFILES_FINDERS = (
 # Make this unique, and don't share it with anybody.
 SECRET_KEY = 'w4*mtn&nquc57h@$-05gva+2ucq0$tnczy#!d=t4%1&pl!p=jo'
 
-MIDDLEWARE_CLASSES = (
+MIDDLEWARE = (
     'django.middleware.common.CommonMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -184,7 +182,9 @@ PERMISSIONS = {
           'update',  # can update an object
           'delete',  # can delete an object,
           'list'),   # can view a list of the objects
-    'blog.post': ('author', 'exclude', 'exclude2', 'readonly', 'readonly2', 'messages', 'csv_import'),
+    'blog.post': (
+        'author', 'exclude', 'exclude2', 'readonly', 'readonly2', 'messages', 'csv_import', 'list_no_pagination'
+    ),
     'auth.user': ('profile',),
 
     # invalid content type for test

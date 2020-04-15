@@ -1,20 +1,19 @@
-from __future__ import unicode_literals
-
 import json
 import pytz
-import smartmin
+from unittest.mock import patch
 
 from datetime import datetime, timedelta
 from django.conf import settings
 from django.contrib.auth.models import User, Group
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.test import TestCase
 from django.test.client import Client
 from django.test.utils import override_settings
 from django.utils import timezone
-from mock import patch
+
+import smartmin
 from smartmin.csv_imports.models import ImportTask
 from smartmin.management import check_role_permissions
 from smartmin.models import SmartImportRowError
@@ -23,6 +22,7 @@ from smartmin.tests import SmartminTest
 from smartmin.users.models import FailedLogin, RecoveryToken, PasswordHistory, is_password_complex
 from smartmin.views import smart_url
 from smartmin.widgets import DatePickerWidget, ImageThumbnailWidget
+
 from test_runner.blog.models import Post, Category
 from .views import PostCRUDL
 
@@ -125,6 +125,24 @@ class PostTest(SmartminTest):
         self.assertHasAccess(self.editor, read_url)
         self.assertHasAccess(self.author, read_url)
         self.assertHasAccess(self.superuser, read_url)
+
+    def test_refresh_page(self):
+        self.client.login(username='author', password='author')
+
+        refresh_url = reverse('blog.post_refresh', args=[self.post.id])
+
+        response = self.client.get(refresh_url)
+
+        self.assertContains(response, 'function scheduleRefresh')
+
+    def test_norefresh_page(self):
+        self.client.login(username='author', password='author')
+
+        no_refresh_url = reverse('blog.post_no_refresh', args=[self.post.id])
+
+        response = self.client.get(no_refresh_url)
+
+        self.assertNotContains(response, 'function scheduleRefresh')
 
     def test_create_and_update(self):
         self.client.login(username='author', password='author')
@@ -248,6 +266,69 @@ class PostTest(SmartminTest):
         self.assertEqual(response.context['url_params'], '?=x&foo=bar&')
         self.assertEqual(response.context['order_params'], '_order=-title&')
 
+    def test_list_no_pagination(self):
+        post1 = Post.objects.create(title="A First Post", body="Apples", order=3, tags="post",
+                                    created_by=self.author, modified_by=self.author)
+        post2 = Post.objects.create(title="A Second Post", body="Oranges", order=5, tags="post",
+                                    created_by=self.superuser, modified_by=self.superuser)
+        post3 = Post.objects.create(title="A Third Post", body="Apples", order=1, tags="post",
+                                    created_by=self.author, modified_by=self.author)
+        post4 = Post.objects.create(title="A Fourth Post", body="Oranges", order=3, tags="post",
+                                    created_by=self.superuser, modified_by=self.superuser)
+
+        self.client.login(username='author', password='author')
+
+        # default ordering is by title
+        response = self.client.get(reverse('blog.post_list_no_pagination'))
+        self.assertEqual(list(response.context['post_list']), [post1, post4, post2, post3, self.post])
+
+        # try ordering by title reversed
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?_order=-title")
+        self.assertEqual(list(response.context['post_list']), [self.post, post3, post2, post4, post1])
+
+        # try searching (which is case-insensitive)
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?search=apples")
+        self.assertEqual(list(response.context['post_list']), [post1, post3])
+
+        # multiple terms are AND'ed
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?search=apples+first")
+        self.assertEqual(list(response.context['post_list']), [post1])
+
+        # matches on different fields are OR'd
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?search=post")
+        self.assertEqual(list(response.context['post_list']), [post1, post4, post2, post3, self.post])
+
+        # empty search string should be ignored
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?search=")
+        self.assertEqual(list(response.context['post_list']), [post1, post4, post2, post3, self.post])
+
+        # change the format to json
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?_format=json")
+        self.assertEqual(json.loads(response.content.decode("utf-8")), [
+            {'tags': 'post', 'title': 'A First Post', 'body': 'Apples'},
+            {'tags': 'post', 'title': 'A Fourth Post', 'body': 'Oranges'},
+            {'tags': 'post', 'title': 'A Second Post', 'body': 'Oranges'},
+            {'tags': 'post', 'title': 'A Third Post', 'body': 'Apples'},
+            {'tags': 'testing_tag', 'title': 'Test Post', 'body': 'This is the body of my first test post'}
+         ])
+
+        # change the format to select2
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?_format=select2")
+        self.assertEqual(json.loads(response.content.decode("utf-8")), {
+            'results': [
+                {'id': post1.id, 'text': 'A First Post'},
+                {'id': post4.id, 'text': 'A Fourth Post'},
+                {'id': post2.id, 'text': 'A Second Post'},
+                {'id': post3.id, 'text': 'A Third Post'},
+                {'id': self.post.id, 'text': 'Test Post'}
+            ], 'err': 'nil', 'more': False})
+
+        # check parsing of query string params used for paging URLs
+        response = self.client.get(reverse('blog.post_list_no_pagination') + "?=x&foo=bar&_order=-title&page=1")
+        self.assertEqual(list(response.context['post_list']), [self.post, post3, post2, post4, post1])
+        self.assertEqual(response.context['url_params'], '?=x&foo=bar&')
+        self.assertEqual(response.context['order_params'], '_order=-title&')
+
     def test_success_url(self):
         self.client.login(username='author', password='author')
 
@@ -316,13 +397,13 @@ class PostTest(SmartminTest):
         permissions = ('blog.post.*', 'blog.post.too.many.dots', 'blog.category.not_valid_either', 'blog.',
                        'blog.foo.*')
 
-        self.assertEquals(17, authors.permissions.all().count())
+        self.assertEquals(18, authors.permissions.all().count())
 
         # check that they are reassigned
         check_role_permissions(authors, permissions, authors.permissions.all())
 
         # removing all category actions should bring us to 10
-        self.assertEquals(12, authors.permissions.all().count())
+        self.assertEquals(13, authors.permissions.all().count())
 
     def test_smart_model(self):
         d1 = datetime(2016, 12, 31, 9, 20, 30, 123456, tzinfo=pytz.timezone("Africa/Kigali"))
@@ -403,6 +484,9 @@ class PostTest(SmartminTest):
 
             task = ImportTask.objects.get()
             self.assertEqual(json.loads(task.import_results), dict(records=4, errors=0, error_messages=[]))
+
+            # new posts should all have a new tag
+            self.assertEqual(Post.objects.filter(tags="new").count(), 4)
 
             ImportTask.objects.all().delete()
 
@@ -901,7 +985,7 @@ class UserTest(TestCase):
         # try to log in four times
         for i in range(4):
             response = self.client.post(login_url, post_data)
-            self.assertFalse(response.context['user'].is_authenticated())
+            self.assertFalse(response.context['user'].is_authenticated)
 
         # on the fifth failed login we get redirected
         response = self.client.post(login_url, post_data)
@@ -1047,14 +1131,14 @@ class UserLockoutTestCase(TestCase):
 
         # on the fifth time it should fail
         response = self.client.post(reverse('users.user_login'), post_data, follow=True)
-        self.assertFalse(response.context['user'].is_authenticated())
+        self.assertFalse(response.context['user'].is_authenticated)
         content = response.content.decode("utf-8")
         self.assertEqual(content.find(reverse('users.user_forget')), -1)
 
         # even with right password, no dice
         post_data = dict(username='plain', password='plain')
         response = self.client.post(reverse('users.user_login'), post_data, follow=True)
-        self.assertFalse(response.context['user'].is_authenticated())
+        self.assertFalse(response.context['user'].is_authenticated)
         content = response.content.decode("utf-8")
         self.assertEqual(content.find(reverse('users.user_forget')), -1)
 
@@ -1076,7 +1160,7 @@ class UserLockoutTestCase(TestCase):
 
             # should now be able to log in
             response = self.client.post(reverse('users.user_login'), post_data, follow=True)
-            self.assertTrue(response.context['user'].is_authenticated())
+            self.assertTrue(response.context['user'].is_authenticated)
 
     def testNoRecoveryNoTimeout(self):
         with self.settings(USER_ALLOW_EMAIL_RECOVERY=False, USER_LOCKOUT_TIMEOUT=-1):
@@ -1121,7 +1205,7 @@ class UserLockoutTestCase(TestCase):
 
             post_data = dict(username='plain', password='Password1')
             response = self.client.post(reverse('users.user_login'), post_data, follow=True)
-            self.assertTrue(response.context['user'].is_authenticated())
+            self.assertTrue(response.context['user'].is_authenticated)
 
 
 class PasswordExpirationTestCase(TestCase):
@@ -1143,7 +1227,7 @@ class PasswordExpirationTestCase(TestCase):
         self.client.logout()
         post_data = dict(username='plain', password='Password1 ')
         response = self.client.post(reverse('users.user_login'), post_data, follow=True)
-        self.assertTrue(response.context['user'].is_authenticated())
+        self.assertTrue(response.context['user'].is_authenticated)
 
         # we shouldn't be on a page asking us for a new password
         self.assertFalse('form' in response.context)

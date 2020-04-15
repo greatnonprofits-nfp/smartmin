@@ -1,14 +1,11 @@
-from __future__ import unicode_literals
-
-import six
 import uuid
 
 from django.db import models
 from django.utils.timezone import now
+
 from smartmin.models import SmartModel, ActiveManager
 
 
-@six.python_2_unicode_compatible
 class Post(SmartModel):
     title = models.CharField(max_length=128,
                              help_text="The title of this blog post, keep it relevant")
@@ -20,6 +17,9 @@ class Post(SmartModel):
     uuid = models.UUIDField(default=uuid.uuid4, editable=False)
 
     written_on = models.DateField(default=now, null=True, blank=True)
+
+    image = models.ImageField(upload_to="images", null=True, blank=True,
+                              help_text="The logo that should be used for this post")
 
     objects = models.Manager()
     active = ActiveManager()
@@ -38,6 +38,10 @@ class Post(SmartModel):
     def validate_import_header(cls, header):
         if 'title' not in header:
             raise Exception('missing "title" header')
+
+    @classmethod
+    def finalize_import(cls, task, records):
+        Post.objects.filter(id__in=[p.id for p in records]).update(tags="new")
 
     def __str__(self):
         return self.title

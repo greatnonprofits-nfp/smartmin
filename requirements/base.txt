@@ -1,9 +1,8 @@
 celery
-django>=1.9,<2.0
+django>=2.1,<3.0
 django_compressor
 pytz
 redis
-six
 sqlparse
 xlrd
 xlwt

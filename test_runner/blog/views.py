@@ -1,8 +1,7 @@
-from __future__ import unicode_literals
-
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.models import User
+
 from smartmin.views import SmartCRUDL, SmartCreateView, SmartReadView, SmartListView, SmartUpdateView
 from .models import Post, Category
 
@@ -42,8 +41,10 @@ class CategoryCRUDL(SmartCRUDL):
 
 class PostCRUDL(SmartCRUDL):
     model = Post
-    actions = ('create', 'read', 'update', 'delete', 'list', 'author',
-               'exclude', 'exclude2', 'readonly', 'readonly2', 'messages', 'csv_import', 'by_uuid')
+    actions = (
+        'create', 'read', 'update', 'delete', 'list', 'author', 'exclude', 'exclude2', 'readonly', 'readonly2',
+        'messages', 'csv_import', 'by_uuid', 'refresh', 'no_refresh', 'list_no_pagination'
+    )
 
     class Read(SmartReadView):
         permission = None
@@ -52,6 +53,22 @@ class PostCRUDL(SmartCRUDL):
         fields = ('title', 'tags', 'created_on', 'created_by')
         search_fields = ('title__icontains', 'body__icontains')
         default_order = 'title'
+
+        def as_json(self, context):
+            items = []
+            for obj in self.object_list:
+                items.append(dict(title=obj.title,
+                                  body=obj.body,
+                                  tags=obj.tags))
+
+            return items
+
+    class ListNoPagination(SmartListView):
+        fields = ('title', 'tags', 'created_on', 'created_by')
+        search_fields = ('title__icontains', 'body__icontains')
+        default_order = 'title'
+
+        paginate_by = None
 
         def as_json(self, context):
             items = []
@@ -96,3 +113,15 @@ class PostCRUDL(SmartCRUDL):
 
     class ByUuid(SmartReadView):
         slug_url_kwarg = 'uuid'
+
+    class Refresh(SmartReadView):
+        permission = None
+
+        def derive_refresh(self):
+            return 123
+
+    class NoRefresh(SmartReadView):
+        permission = None
+
+        def derive_refresh(self):
+            return 0

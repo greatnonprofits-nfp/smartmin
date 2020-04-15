@@ -1,16 +1,12 @@
-from __future__ import unicode_literals
+from io import StringIO
 
 from celery.task import task
+
 from django.db import transaction
 from django.utils import timezone
 from django.utils.module_loading import import_string
-from .models import ImportTask
 
-# python2 and python3 support
-try:
-    from StringIO import StringIO
-except ImportError:
-    from io import StringIO
+from .models import ImportTask
 
 
 @task(track_started=True)
@@ -37,14 +33,17 @@ def csv_import(task_id):  # pragma: no cover
 
     except Exception as e:
         import traceback
-        traceback.print_exc(e)
+        traceback.print_exc()
 
         task_obj.task_status = ImportTask.FAILURE
 
-        task_obj.log("\nError: %s\n" % e)
+        task_obj.log("\nError: %s\n" % str(e))
         task_obj.log(log.getvalue())
         task_obj.save()
 
         raise e
+
+    # give our model the opportunity to do any last finalization outside our transaction
+    model.finalize_import(task_obj, records)
 
     return task_obj

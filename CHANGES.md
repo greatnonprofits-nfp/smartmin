@@ -1,3 +1,45 @@
+2.1.1 (2019-01-07)
+==================
+* Fix domain names in forgot password emails
+* Test against PostgreSQL 10
+
+2.1.0 (2018-11-27)
+==================
+* Add support for Django 2.1
+
+2.0.2 (2018-10-01)
+==================
+
+* Fix CSV import file_path truncation
+
+2.0.1 (2018-09-12)
+==================
+
+* Stop embedding refresh code on pages that don't have View.refresh set
+
+2.0.0 (2018-07-25)
+==================
+
+* Add support for Django 2.0, drop support for Django 1.9 and Django 1.10
+* Drop support for Python2
+
+1.11.9 (2018-05-3)
+===================
+ * Create SmartminTestMixin https://github.com/nyaruka/smartmin/pull/116
+ * add 'create_anonymous_user' method that will ensure that anonymous user exists
+
+1.11.8 (2018-03-15)
+===================
+ * Fix Python 3 exception usage https://github.com/nyaruka/smartmin/pull/114
+
+1.11.7 (2018-02-23)
+===================
+ * Fix Python 3 issue with comparing ints and None https://github.com/nyaruka/smartmin/pull/113
+
+1.11.6 (2017-12-11)
+===================
+ * Fix collect_sql when objects of different types have same name https://github.com/nyaruka/smartmin/pull/111
+
 1.11.5 (2017-11-15)
 ====================
  * Add collect_sql and migrate_manual management commands https://github.com/nyaruka/smartmin/pull/108

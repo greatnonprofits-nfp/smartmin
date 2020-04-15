@@ -1,5 +1,3 @@
-from __future__ import unicode_literals
-
 from django.conf.urls import include, url
 from django.contrib import admin
 
@@ -10,5 +8,5 @@ urlpatterns = [
     url(r'^csv_imports/', include('smartmin.csv_imports.urls')),
 
     # Uncomment the next line to enable the admin:
-    url(r'^admin/', include(admin.site.urls)),
+    url(r'^admin/', admin.site.urls),
 ]

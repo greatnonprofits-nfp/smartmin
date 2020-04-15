@@ -1,19 +1,22 @@
-from __future__ import unicode_literals
-
 import os
 
 from django.db import models
 from django.utils import timezone
 from django.utils.module_loading import import_string
+
 from smartmin.models import SmartModel
 
 
 def generate_file_path(instance, filename):
-    name, extension = os.path.splitext(filename)
-    if len(name) + len(extension) >= 100:
-        name = name[:100-len(extension)]
 
-    return "csv_imports/%s%s" % (name, extension)
+    file_path_prefix = 'csv_imports/'
+
+    name, extension = os.path.splitext(filename)
+
+    if len(name) + len(extension) >= 100:
+        name = name[:100-len(extension)-len(file_path_prefix)]
+
+    return "%s%s%s" % (file_path_prefix, name, extension)
 
 
 class ImportTask(SmartModel):
