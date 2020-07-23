@@ -266,6 +266,10 @@ class PostTest(SmartminTest):
         self.assertEqual(response.context['url_params'], '?=x&foo=bar&')
         self.assertEqual(response.context['order_params'], '_order=-title&')
 
+        # check escaping of keys and values in params
+        response = self.client.get(reverse('blog.post_list') + "?\"<alert>=<alert>")
+        self.assertEqual(response.context['url_params'], '?%22%3Calert%3E=%3Calert%3E&')
+
     def test_list_no_pagination(self):
         post1 = Post.objects.create(title="A First Post", body="Apples", order=3, tags="post",
                                     created_by=self.author, modified_by=self.author)
@@ -462,6 +466,9 @@ class PostTest(SmartminTest):
     def test_get_import_file_headers(self):
         with open('test_runner/blog/test_files/posts.csv', 'rb') as open_file:
             self.assertEqual(Post.get_import_file_headers(open_file), ['title', 'body', 'order', 'tags'])
+
+        with open('test_runner/blog/test_files/bom_import.csv', 'rb') as open_file:
+            self.assertEqual(Post.get_import_file_headers(open_file), ['urn:tel', 'name', 'field:email-address'])
 
     def test_csv_import(self):
         with self.settings(CELERY_ALWAYS_EAGER=True, CELERY_RESULT_BACKEND='cache', CELERY_CACHE_BACKEND='memory'):
