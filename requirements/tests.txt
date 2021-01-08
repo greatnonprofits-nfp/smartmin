@@ -2,3 +2,5 @@ psycopg2
 funcsigs
 flake8
 pillow
+phonenumbers
+git+https://github.com/greatnonprofits-nfp/rapidpro.git@dev-3.0
