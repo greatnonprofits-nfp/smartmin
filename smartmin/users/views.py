@@ -534,7 +534,11 @@ class Login(LoginView):
 
             if cellphone and country_code:
                 cellphone_w_cc = '+%s%s' % (country_code, cellphone)
-                phone = phonenumbers.parse(cellphone_w_cc)
+                try:
+                    phone = phonenumbers.parse(cellphone_w_cc)
+                except Exception:
+                    messages.error(request, 'Invalid phone number')
+                    return self.form_invalid(form)
 
                 # Generating Authy user
                 # Making sure that username (email) does not have + because Twilio considers as invalid email
