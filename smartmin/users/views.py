@@ -563,7 +563,9 @@ class Login(LoginView):
             # Redirecting user to add cell phone or asking the Authy code
             if not user_settings.tel:
                 form_is_valid = False
-                messages.info(request, _('Inform your phone number to make sure that you are making safe login'))
+                messages.info(request, _(
+                    'Please provide your phone number for authentication purposes to ensure your login is secure.'
+                ))
                 self.set_authy_extra_data(dict(
                     no_cellphone=True,
                     no_recaptcha=True
@@ -585,7 +587,7 @@ class Login(LoginView):
                 response_json = response.json()
                 if not response_json.get('success'):
                     FailedLogin.objects.create(user=user)
-                    messages.error(request, _('Login failed: incorrect Authy code'))
+                    messages.error(request, _('Login failed: incorrect SMS or Authy code'))
                     return HttpResponseRedirect(reverse('users.user_login'))
 
         # pass through the normal login process
