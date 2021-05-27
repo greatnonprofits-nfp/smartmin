@@ -1,3 +1,44 @@
+v2.3.8
+----------
+ * Fix pagination index
+
+v2.3.7
+----------
+ * Fix thumbnail widget to only use sorl function if we have an image value
+
+v2.3.6
+----------
+ * Revert redis downgrade
+ * Use thumnail image in the image widget when we have the sorl thumbnail installed
+
+v2.3.5
+----------
+ * Downgrade xlrd dep to 1.2.0
+
+v2.3.4
+----------
+ * Update deps, downgrading redis requirement
+
+v2.3.3
+----------
+ * Rework login view so we can reuse it more easily when user isn't determined by form
+ * Add data migrations to remove all failed logins
+ * Replace FailedLogin user field by username
+
+v2.3.2
+----------
+ * Merge pull request #143 from nyaruka/forget-password-email-no-user-settings
+ * Merge pull request #142 from nyaruka/update-jquery
+ * Disable sending emails to address without user in the system
+ * Add settings to configure whether we send email when no user is found, default to False
+ * Update jquery
+ * Bump CI testing to PG 11 and 12
+
+v2.3.1
+----------
+ * Convert to poetry
+ * Tweak collec_sql verbose logging and add test for dropping functions
+
 2.3 (2020-10-27)
 ================
 * Fix collect_sql not tracking overloaded functions

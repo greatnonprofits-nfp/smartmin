@@ -269,7 +269,7 @@ class UserCRUDL(SmartCRUDL):
 
             # if a new password was set, reset our failed logins
             if 'new_password' in self.form.cleaned_data and self.form.cleaned_data['new_password']:
-                FailedLogin.objects.filter(user=self.object).delete()
+                FailedLogin.objects.filter(username__iexact=self.object.username).delete()
                 PasswordHistory.objects.create(user=obj, password=obj.password)
 
             if 'tel' in self.form.cleaned_data or 'authy_id' in self.form.cleaned_data:
@@ -295,7 +295,7 @@ class UserCRUDL(SmartCRUDL):
         def post_save(self, obj):
             obj = super(UserCRUDL.Profile, self).post_save(obj)
             if 'new_password' in self.form.cleaned_data and self.form.cleaned_data['new_password']:
-                FailedLogin.objects.filter(user=self.object).delete()
+                FailedLogin.objects.filter(username__iexact=self.object.username).delete()
                 PasswordHistory.objects.create(user=obj, password=obj.password)
 
             return obj
@@ -324,10 +324,7 @@ class UserCRUDL(SmartCRUDL):
 
             from_email = getattr(settings, 'DEFAULT_FROM_EMAIL', 'website@%s' % domain)
             user_email_template = getattr(settings, "USER_FORGET_EMAIL_TEMPLATE", "smartmin/users/user_email.txt")
-            no_user_email_template = getattr(settings, "NO_USER_FORGET_EMAIL_TEMPLATE",
-                                             "smartmin/users/no_user_email.txt")
 
-            email_template = loader.get_template(no_user_email_template)
             user = get_user_model().objects.filter(email__iexact=email).first()
 
             context = build_email_context(self.request, user)
@@ -336,12 +333,12 @@ class UserCRUDL(SmartCRUDL):
                 token = ''.join(random.choice(string.ascii_uppercase + string.digits) for x in range(32))
                 RecoveryToken.objects.create(token=token, user=user)
                 email_template = loader.get_template(user_email_template)
-                FailedLogin.objects.filter(user=user).delete()
+                FailedLogin.objects.filter(username__iexact=user.username).delete()
                 context['user'] = user
                 context['path'] = "%s" % reverse('users.user_recover', args=[token])
 
-            send_mail(_('Password Recovery Request'), email_template.render(context), from_email,
-                      [email], fail_silently=False)
+                send_mail(_('Password Recovery Request'), email_template.render(context), from_email,
+                            [email], fail_silently=False)
 
             response = super(UserCRUDL.Forget, self).form_valid(form)
             return response
@@ -492,106 +489,113 @@ class Login(LoginView):
         user = get_user_model().objects.filter(username__iexact=username).first()
 
         authy_headers = {'x-authy-api-key': getattr(settings, 'AUTHY_API_KEY', '')}
+        valid_password = False
 
         # this could be a valid login by a user
         if user:
-
             # incorrect password?  create a failed login token
             valid_password = is_login_allowed = user.check_password(form.cleaned_data.get('password'))
-            if not valid_password:
-                FailedLogin.objects.create(user=user)
 
-            bad_interval = timezone.now() - timedelta(minutes=lockout_timeout)
-            failures = FailedLogin.objects.filter(user=user)
+        if not user or not valid_password:
+            FailedLogin.objects.create(username=username)
 
-            # if the failures reset after a period of time, then limit our query to that interval
-            if lockout_timeout > 0:
-                failures = failures.filter(failed_on__gt=bad_interval)
+        bad_interval = timezone.now() - timedelta(minutes=lockout_timeout)
+        failures = FailedLogin.objects.filter(username__iexact=username)
 
-            # if there are too many failed logins, take them to the failed page
-            if len(failures) >= failed_login_limit:
-                return HttpResponseRedirect(reverse('users.user_failed'))
+        # if the failures reset after a period of time, then limit our query to that interval
+        if lockout_timeout > 0:
+            failures = failures.filter(failed_on__gt=bad_interval)
 
-            # delete failed logins if the password is valid
-            elif valid_password:
-                FailedLogin.objects.filter(user=user).delete()
+        # if there are too many failed logins, take them to the failed page
+        if len(failures) >= failed_login_limit:
+            return HttpResponseRedirect(reverse('users.user_failed'))
 
-            if not is_login_allowed:
+        if not is_login_allowed:
+            return self.form_invalid(form)
+
+        user_settings = get_user_model().get_settings(user)
+
+        change_phone_number = request.POST.get('change_phone_number', 'false') == 'true'
+        if change_phone_number:
+            user_settings.tel = None
+            user_settings.save(update_fields=['tel'])
+
+        cellphone = request.POST.get('tel', None)
+        country_code = request.POST.get('country_code', None)
+        authy_code = request.POST.get('authy_code', None)
+
+        authy_base_url = 'https://api.authy.com/protected/json/%s'
+
+        if cellphone and country_code:
+            cellphone_w_cc = '+%s%s' % (country_code, cellphone)
+            try:
+                phone = phonenumbers.parse(cellphone_w_cc)
+            except Exception:
+                messages.error(request, 'Invalid phone number')
                 return self.form_invalid(form)
 
-            user_settings = get_user_model().get_settings(user)
+            # Generating Authy user
+            # Making sure that username (email) does not have + because Twilio considers as invalid email
+            if '+' in username:
+                username = username.replace('+', '_')
 
-            change_phone_number = request.POST.get('change_phone_number', 'false') == 'true'
-            if change_phone_number:
-                user_settings.tel = None
-                user_settings.save(update_fields=['tel'])
+            payload = 'user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}'.format(username, cellphone,
+                                                                                                   country_code)
+            create_user_header = authy_headers
+            create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
+            authy_url_api = authy_base_url % 'users/new'
+            response = requests.request("POST", authy_url_api, data=payload, headers=create_user_header)
+            response_json = response.json()
+            if response_json.get('success', False):
+                authy_id = response_json['user']['id']
+                user_settings.tel = phonenumbers.format_number(phone, phonenumbers.PhoneNumberFormat.E164)
+                user_settings.authy_id = authy_id
+                user_settings.save(update_fields=['tel', 'authy_id'])
+            else:
+                messages.error(request, 'Authy message: %s' % response_json.get('message'))
+                return HttpResponseRedirect(reverse('users.user_login'))
 
-            cellphone = request.POST.get('tel', None)
-            country_code = request.POST.get('country_code', None)
-            authy_code = request.POST.get('authy_code', None)
-
-            authy_base_url = 'https://api.authy.com/protected/json/%s'
-
-            if cellphone and country_code:
-                cellphone_w_cc = '+%s%s' % (country_code, cellphone)
-                try:
-                    phone = phonenumbers.parse(cellphone_w_cc)
-                except Exception:
-                    messages.error(request, 'Invalid phone number')
-                    return self.form_invalid(form)
-
-                # Generating Authy user
-                # Making sure that username (email) does not have + because Twilio considers as invalid email
-                if '+' in username:
-                    username = username.replace('+', '_')
-
-                payload = 'user%5Bemail%5D={}&user%5Bcellphone%5D={}&user%5Bcountry_code%5D={}'.format(username, cellphone, country_code)
-                create_user_header = authy_headers
-                create_user_header.update({'content-type': 'application/x-www-form-urlencoded'})
-                authy_url_api = authy_base_url % 'users/new'
-                response = requests.request("POST", authy_url_api, data=payload, headers=create_user_header)
-                response_json = response.json()
-                if response_json.get('success', False):
-                    authy_id = response_json['user']['id']
-                    user_settings.tel = phonenumbers.format_number(phone, phonenumbers.PhoneNumberFormat.E164)
-                    user_settings.authy_id = authy_id
-                    user_settings.save(update_fields=['tel', 'authy_id'])
-                else:
-                    messages.error(request, 'Authy message: %s' % response_json.get('message'))
-                    return HttpResponseRedirect(reverse('users.user_login'))
-
-            # Redirecting user to add cell phone or asking the Authy code
-            if not user_settings.tel:
-                form_is_valid = False
-                messages.info(request, _(
-                    'Please provide your phone number for authentication purposes to ensure your login is secure.'
-                ))
-                self.set_authy_extra_data(dict(
-                    no_cellphone=True,
-                    no_recaptcha=True
-                ))
-            elif not authy_code:
-                form_is_valid = False
-                authy_url_api = authy_base_url % 'sms/%s' % user_settings.authy_id
-                requests.request("GET", authy_url_api, headers=authy_headers)
-                self.set_authy_extra_data(dict(
-                    no_authy_code=True,
-                    no_recaptcha=True
-                ))
-            elif authy_code and authy_code == authy_magic_pass:
-                # Allow login by Authy Magic Password
-                pass
-            elif authy_code:
-                authy_url_api = authy_base_url % 'verify/%s/%s' % (authy_code, user_settings.authy_id)
-                response = requests.request("GET", authy_url_api, headers=authy_headers)
-                response_json = response.json()
-                if not response_json.get('success'):
-                    FailedLogin.objects.create(user=user)
-                    messages.error(request, _('Login failed: incorrect SMS or Authy code'))
-                    return HttpResponseRedirect(reverse('users.user_login'))
+        # Redirecting user to add cell phone or asking the Authy code
+        if not user_settings.tel:
+            form_is_valid = False
+            messages.info(request, _(
+                'Please provide your phone number for authentication purposes to ensure your login is secure.'
+            ))
+            self.set_authy_extra_data(dict(
+                no_cellphone=True,
+                no_recaptcha=True
+            ))
+        elif not authy_code:
+            form_is_valid = False
+            authy_url_api = authy_base_url % 'sms/%s' % user_settings.authy_id
+            requests.request("GET", authy_url_api, headers=authy_headers)
+            self.set_authy_extra_data(dict(
+                no_authy_code=True,
+                no_recaptcha=True
+            ))
+        elif authy_code and authy_code == authy_magic_pass:
+            # Allow login by Authy Magic Password
+            pass
+        elif authy_code:
+            authy_url_api = authy_base_url % 'verify/%s/%s' % (authy_code, user_settings.authy_id)
+            response = requests.request("GET", authy_url_api, headers=authy_headers)
+            response_json = response.json()
+            if not response_json.get('success'):
+                FailedLogin.objects.create(user=user)
+                messages.error(request, _('Login failed: incorrect SMS or Authy code'))
+                return HttpResponseRedirect(reverse('users.user_login'))
 
         # pass through the normal login process
         if form_is_valid:
             return self.form_valid(form)
         else:
             return self.form_invalid(form)
+
+    def form_valid(self, form):
+        # clean up any failed logins for this user
+        FailedLogin.objects.filter(username__iexact=self.get_username(form)).delete()
+
+        return super().form_valid(form)
+
+    def get_username(self, form):
+        return form.cleaned_data.get('username')
