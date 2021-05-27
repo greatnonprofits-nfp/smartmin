@@ -46,6 +46,12 @@ class ImageThumbnailWidget(widgets.ClearableFileInput):
     def render(self, name, value, attrs=None, renderer=None):
         thumb_html = '<table><tr>'
         if value and hasattr(value, "url"):
+            try:
+                from sorl.thumbnail import get_thumbnail
+                value = get_thumbnail(value, f"{self.width}x{self.height}", crop='center', quality=99)
+            except ImportError:
+                pass
+
             thumb_html += '<td><img src="%s" width="%s" width="%s" /></td>' % (value.url, self.width, self.height)
 
         thumb_html += '<td><input type="checkbox" name="%s-clear" /> Clear' % name
