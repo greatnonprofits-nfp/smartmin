@@ -24,7 +24,7 @@ from smartmin.email import build_email_context
 from smartmin.views import SmartCRUDL, SmartView, SmartFormView, SmartListView, SmartCreateView, SmartUpdateView
 from .models import RecoveryToken, PasswordHistory, FailedLogin, is_password_complex
 
-from temba.channels.views import ALL_COUNTRIES, COUNTRY_CALLING_CODES
+from smartmin.users.utils import ALL_COUNTRIES, COUNTRY_CALLING_CODES
 
 
 class UserForm(forms.ModelForm):
