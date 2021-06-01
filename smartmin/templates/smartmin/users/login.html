@@ -2,41 +2,119 @@
 
 {% load smartmin i18n %}
 
-{% block login %}{% endblock %}
 
 {% block content %}
-<div class="row">
-  <div class="col-md-7 col-md-offset-2">
-    <div class="page-header"><h2>{% trans "Sign in" %}</h2></div>
-
-    <form method="post" class="form-stacked" id="login-form">
-      {% for field, errors in form.errors.items %}
-      {% if field == '__all__' %}
-      <div class="alert alert-danger form-errors">
-        <h3>Error</h3>
-        {{ errors }}
-      </div>
-      {% endif %}
-      {% endfor %}
-      
-      <fieldset>
-        {% for field in form %}
-        <div class="form-group {% if field.error %}has-error{% endif %}">
-          <label for="{{ field.name }}">{{ field.label }}</label>
-          <div class="input">{{ field|add_css:"form-control" }}</div>
-          {% if field.error %}
-          <span class="help-block">{{ field.error }}</span>
-          {% endif %}
-        </div>
-        {% endfor %}
-        {% csrf_token %}
-        <button type="submit" class="btn btn-primary">{% trans "Login" %}</button>
-        {% if allow_email_recovery %}
-        <span class="pull-right" style="padding-top:7px;padding-right:150px;"><a href="{% url 'users.user_forget' %}">{% trans "Forgot Password?" %}</a></span>
-        {% endif %}
-      </fieldset>
-    </form>
-  </div>
-
+<div class="flex justify-center">
+    <div class="w-128 p-12">
+        <div class="page-title">{% trans "Welcome Back" %}</div>
+        {% blocktrans %}Please sign in with your email address and password.{% endblocktrans %}
+        <form id="login-form" method="POST" action="/users/login/?next={{ request.GET.next }}" onsubmit="return validateRecaptcha();">
+            {% csrf_token %}
+            {% for field, errors in form.errors.items %}
+                {% if field == '__all__' %}
+                    <div class="alert-error my-4">
+                        {{ errors }}
+                    </div>
+                {% endif %}
+            {% endfor %}
+            <div class="mt-4">
+                <temba-textinput
+                        name="username"
+                        maxlength="254"
+                        placeholder="{{_("Email Address")|escapejs}}"
+                        value="{% if form.username.value%}{{form.username.value|escape}}{% endif %}">
+                </temba-textinput>
+            </div>
+            {% if form.username.errors %}
+                <div class="alert-error mt-4">
+                    {{form.username.errors}}
+                </div>
+            {% endif %}
+            <div class="mt-4">
+                <temba-textinput
+                        name="password"
+                        placeholder="{{_("Password")|escapejs}}"
+                        password="true"
+                        value="{% if form.password.value%}{{form.password.value|escape}}{%endif%}">
+                </temba-textinput>
+            </div>
+            {% if no_cellphone %}
+                <div class="mt-4" style="display: table; width: 100%;">
+                    <div class="w-2/5 md:float-left">
+                        <temba-select id="country" name="country_code" searchable="true">
+                            {% for country in countries %}
+                                <temba-option value="{{country.value}}" name="{{country.text}}"></temba-option>
+                            {% endfor %}
+                        </temba-select>
+                    </div>
+                    <div class="md:w-7/12 md:float-right">
+                        <temba-textinput name="tel" placeholder="{{_("Phone Number")|escapejs}}"></temba-textinput>
+                        <div class="mt-2 text-left">
+                            Ex. 4154354423
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+            {% if no_authy_code %}
+                <div class="mt-4">
+                    <temba-textinput name="authy_code" placeholder="{{_("SMS Code")|escapejs}}"></temba-textinput>
+                    <a href="javascript:resendCode();" class="mt-2">
+                        {% trans "Resend code" %}
+                    </a>
+                </div>
+                <input id="change_phone_number" type="hidden" name="change_phone_number" value="">
+            {% endif %}
+            {% if form.password.errors %}
+                <div class="alert-error mt-4">
+                    {{form.password.errors}}
+                </div>
+            {% endif %}
+            {% if not no_recaptcha %}
+                <div id="recaptcha" style="margin: 10px 0"></div>
+            {% endif %}
+            <div class="md\:w-full">
+                <div class="'w-5/12 mt-2 text-right float-right">
+                    {% if no_authy_code %}
+                        <a href="javascript:changePhoneNumberProcess();">Change phone number?</a>
+                    {% else %}
+                        <a href="/users/user/forget/">Forgot your password?</a>
+                    {% endif %}
+                </div>
+                <div class="mt-6 w-6/12">
+                    <input type="submit" class="button-primary" value="{{_("Sign In")}}">
+                </div>
+            </div>
+        </form>
+    </div>
 </div>
+{% endblock %}
+
+{% block extra-script %}
+    <script>
+      function changePhoneNumberProcess() {
+        $('#change_phone_number').val('true');
+        $('form#login-form').removeAttr('onsubmit');
+        $('form#login-form').submit();
+      }
+      function resendCode() {
+        $('form#login-form').removeAttr('onsubmit');
+        $('[name="authy_code"]').val('');
+        $('form#login-form').submit();
+      }
+    </script>
+    {% if not no_recaptcha %}
+      <script src="https://www.google.com/recaptcha/api.js?render={{ recaptcha_secrete_key }}"></script>
+      <script>
+        function validateRecaptcha() {
+          const response = grecaptcha.getResponse();
+          return response.length !== 0;
+        }
+
+        grecaptcha.ready(() => {
+          grecaptcha.render('recaptcha', {
+            'sitekey': '{{ recaptcha_site_key }}'
+          });
+        });
+      </script>
+    {% endif %}
 {% endblock %}
